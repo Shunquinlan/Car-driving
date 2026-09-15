@@ -17,7 +17,7 @@
   const CONFIG = {
     // Paste your Google Apps Script Web App URL here. It ends with /exec.
     // While this is empty, the calendar runs in preview mode with sample times.
-    API_URL: 'https://github.com/Shunquinlan/Car-driving/blob/main/README.md',
+    API_URL: 'https://script.google.com/macros/s/AKfycbzFaYgdGc0iAjJLaETWELtVIXL2AcuW01K5nVDM0S3UoAa6TYego-fNioTcFuAK5JHg/exec',
 
     INSTRUCTOR_NAME: 'Shun',
     RATE_PER_HOUR: 25,        // keep in sync with RATE_PER_HOUR in Code.gs
