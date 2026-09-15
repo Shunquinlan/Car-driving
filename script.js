@@ -17,10 +17,11 @@
   const CONFIG = {
     // Paste your Google Apps Script Web App URL here. It ends with /exec.
     // While this is empty, the calendar runs in preview mode with sample times.
-    API_URL: 'https://script.google.com/macros/s/AKfycbzFaYgdGc0iAjJLaETWELtVIXL2AcuW01K5nVDM0S3UoAa6TYego-fNioTcFuAK5JHg/exec',
+    API_URL: '',
 
     INSTRUCTOR_NAME: 'Shun',
-    RATE_PER_HOUR: 25,        // keep in sync with RATE_PER_HOUR in Code.gs
+    RATE_PER_HOUR: 25,        // starting rate; the real rate comes from the backend once it's connected
+    FIRST_LESSON_DISCOUNT_PERCENT: 50, // shown in preview mode; the real backend sends its own value
     SLOT_MINUTES: 60,         // keep in sync with SLOT_MINUTES in Code.gs
     DAYS_AHEAD: 30,           // how many days of the calendar are bookable (≤ MAX_DAYS_AHEAD in Code.gs)
     REQUEST_TIMEOUT_MS: 20000,
@@ -53,7 +54,11 @@
   };
   const formatDate = (key, options = { weekday: 'long', month: 'long', day: 'numeric' }) =>
     fromKey(key).toLocaleDateString('en-US', options);
-  const money = (n) => `$${Number(n).toLocaleString('en-US')}`;
+  const money = (n) => {
+    const v = Number(n);
+    const decimals = Number.isInteger(v) ? 0 : 2;   // $25, but $12.50
+    return `$${v.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: 2 })}`;
+  };
   const hoursLabel = (h) => `${h} hour${h === 1 ? '' : 's'}`;
   const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const scrollToEl = (el) => el && el.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
@@ -152,6 +157,9 @@
   const DemoBackend = {
     hours: { 0: null, 1: [9, 17], 2: [9, 17], 3: [9, 17], 4: [9, 17], 5: [9, 17], 6: [9, 13] }, // weekday -> [open, close]
     booked: new Set(),
+    seenContacts: new Set(), // preview-only stand-in for "has this phone/email booked before?"
+    rate: CONFIG.RATE_PER_HOUR,
+    discountPercent: CONFIG.FIRST_LESSON_DISCOUNT_PERCENT,
 
     hash(str) {
       let h = 0;
@@ -177,13 +185,21 @@
         }
         days[key] = list;
       }
-      return { ok: true, demo: true, slotMinutes: 60, days };
+      return { ok: true, demo: true, slotMinutes: 60, days, ratePerHour: this.rate, discountPercent: this.discountPercent };
     },
 
     async book(details) {
       await wait(800);
       for (let i = 0; i < details.duration; i++) this.booked.add(`${details.date} ${addMinutes(details.time, i * 60)}`);
-      return { ok: true, demo: true, bookingId: `PREVIEW-${Math.random().toString(36).slice(2, 6).toUpperCase()}` };
+      const contactKey = `${details.phone.replace(/\D/g, '')}|${details.email.trim().toLowerCase()}`;
+      const isFirst = this.discountPercent > 0 && !this.seenContacts.has(contactKey);
+      this.seenContacts.add(contactKey);
+      let price = details.duration * this.rate;
+      if (isFirst) price = Math.round(price * (100 - this.discountPercent)) / 100;
+      return {
+        ok: true, demo: true, bookingId: `PREVIEW-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+        price, discountApplied: isFirst,
+      };
     },
   };
 
@@ -209,6 +225,7 @@
         timesBody: $('times-body'),
         sLength: $('s-length'),
         sCar: $('s-car'),
+        sDiscountNote: $('s-discount-note'),
         sDate: $('s-date'),
         sTime: $('s-time'),
         sTotal: $('s-total'),
@@ -228,6 +245,8 @@
         month: new Date(today.getFullYear(), today.getMonth(), 1),
         days: {},
         slotMinutes: CONFIG.SLOT_MINUTES,
+        ratePerHour: CONFIG.RATE_PER_HOUR,
+        discountPercent: CONFIG.FIRST_LESSON_DISCOUNT_PERCENT,
         loading: true,
         loadError: '',
         notice: '',
@@ -283,6 +302,8 @@
           const data = await Api.availability(state.rangeStart, state.rangeEnd);
           state.days = data.days || {};
           state.slotMinutes = Number(data.slotMinutes) || CONFIG.SLOT_MINUTES;
+          if (Number(data.ratePerHour) > 0) state.ratePerHour = Number(data.ratePerHour);
+          state.discountPercent = Number(data.discountPercent) || 0;
         } catch (err) {
           state.loadError = err.message;
         }
@@ -420,14 +441,20 @@
       };
 
       const renderSummary = () => {
-        const total = state.duration * CONFIG.RATE_PER_HOUR;
+        const total = state.duration * state.ratePerHour;
         el.sLength.textContent = hoursLabel(state.duration);
-        el.sCar.textContent = state.vehicle === 'own' ? 'Your car' : `${CONFIG.INSTRUCTOR_NAME}'s car`;
+        el.sCar.textContent = state.vehicle === 'own' ? 'Your car' : "Instructor's car";
         el.sDate.textContent = state.date ? formatDate(state.date, { weekday: 'short', month: 'short', day: 'numeric' }) : 'Not picked yet';
         el.sTime.textContent = state.time
           ? `${formatTime(state.time)} \u2013 ${formatTime(addMinutes(state.time, state.duration * 60))}`
           : 'Not picked yet';
         el.sTotal.textContent = money(total) + (state.vehicle === 'instructor' ? ' + fuel' : '');
+        if (el.sDiscountNote) {
+          el.sDiscountNote.hidden = !(state.discountPercent > 0);
+          if (state.discountPercent > 0) {
+            el.sDiscountNote.textContent = `New students get ${state.discountPercent}% off this price on their first lesson, applied automatically.`;
+          }
+        }
       };
 
       const render = () => {
@@ -590,7 +617,7 @@
 
       /* ---------- Confirmation ---------- */
 
-      const googleCalendarUrl = (d) => {
+      const googleCalendarUrl = (d, total) => {
         const day = d.date.replace(/-/g, '');
         const start = `${d.time.replace(':', '')}00`;
         const end = `${addMinutes(d.time, d.duration * 60).replace(':', '')}00`;
@@ -598,24 +625,25 @@
           action: 'TEMPLATE',
           text: `Driving lesson with ${CONFIG.INSTRUCTOR_NAME}`,
           dates: `${day}T${start}/${day}T${end}`,
-          details: `Bring your learner's permit. ${money(d.duration * CONFIG.RATE_PER_HOUR)} is due on the day of the lesson.`,
+          details: `Bring your learner's permit. ${money(total)} is due on the day of the lesson.`,
           location: d.meetingSpot || '',
         });
         return `https://calendar.google.com/calendar/render?${params.toString()}`;
       };
 
       const showConfirmation = (d, result) => {
-        const total = d.duration * CONFIG.RATE_PER_HOUR;
+        const total = typeof result.price === 'number' ? result.price : d.duration * state.ratePerHour;
         const end = addMinutes(d.time, d.duration * 60);
         document.getElementById('confirm-when').textContent =
           `${formatDate(d.date)}, ${formatTime(d.time)} \u2013 ${formatTime(end)}`;
         document.getElementById('confirm-lead').textContent =
           `${CONFIG.INSTRUCTOR_NAME} has been notified and will contact you at ${d.phone} to confirm where to meet.` +
           (Api.isLive() ? ` A confirmation email is on its way to ${d.email}.` : ' (Preview mode: nothing was actually sent.)');
+        const discountNote = result.discountApplied ? 'Your first-lesson discount is included. ' : '';
         document.getElementById('confirm-pay').textContent =
-          `Pay ${money(total)} on the day of your lesson` + (d.vehicle === 'instructor' ? ', plus the cost of fuel.' : '.');
+          discountNote + `Pay ${money(total)} on the day of your lesson` + (d.vehicle === 'instructor' ? ', plus the cost of fuel.' : '.');
         document.getElementById('confirm-ref').textContent = result.bookingId || '';
-        document.getElementById('gcal-link').href = googleCalendarUrl(d);
+        document.getElementById('gcal-link').href = googleCalendarUrl(d, total);
 
         el.form.hidden = true;
         el.confirmation.hidden = false;

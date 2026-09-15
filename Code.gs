@@ -5,14 +5,16 @@
  * Google Sheet, then follow README.md, Part 1.
  *
  * What it does
- *   GET  ?action=availability   returns open start times only (no names or numbers)
+ *   GET  ?action=availability   returns open start times and the current rate (no names or numbers)
  *   POST {action:"book", ...}   checks the slot is still free, saves the booking,
  *                               alerts Shun's phone and emails the student
+ *   GET/POST ?action=admin_*    powers admin.html (README Part 3). Requires ADMIN_KEY below.
  *
- * Shun manages everything from the Sheet:
+ * Shun manages everything from the Sheet, or from admin.html:
  *   Bookings  one row per lesson. Set Status to "Cancelled" to free the time.
  *   Hours     weekly working hours. Leave a day blank to close it.
  *   Time Off  block a day, a range of days or part of a day.
+ *   Settings  the hourly rate and the first-lesson discount percentage.
  * ---------------------------------------------------------------------------
  */
 
@@ -21,13 +23,15 @@ const SETTINGS = {
   BUSINESS_NAME: 'Drive with Shun',
   INSTRUCTOR_NAME: 'Shun',
   OWNER_EMAIL: '',              // where alerts go. Blank = the Google account that owns this script
-  RATE_PER_HOUR: 25,            // keep in sync with script.js
+  RATE_PER_HOUR: 25,            // starting rate. Change it any time from the Settings tab or admin.html, no redeploy needed
+  FIRST_LESSON_DISCOUNT_PERCENT: 50, // starting first-lesson discount. Same as above, editable later
   SLOT_MINUTES: 60,             // keep in sync with script.js
   ALLOWED_HOURS: [1, 2],        // lesson lengths students can book
   MIN_NOTICE_HOURS: 12,         // no bookings sooner than this
   MAX_DAYS_AHEAD: 60,           // no bookings further out than this
   MAX_UPCOMING_PER_PERSON: 3,   // stops one phone number from grabbing every slot
   SEND_CUSTOMER_EMAIL: true,    // email the student a confirmation
+  ADMIN_KEY: '',                // set a private password here before using admin.html (README Part 3)
 
   // ---- Instant alerts to Shun's phone (README Part 2). Blank = turned off ----
   EMAIL_ALERTS: true,           // Gmail app push notification
@@ -42,10 +46,13 @@ const SETTINGS = {
 const SHEET_BOOKINGS = 'Bookings';
 const SHEET_HOURS = 'Hours';
 const SHEET_TIME_OFF = 'Time Off';
+const SHEET_SETTINGS = 'Settings';
+
+const STATUSES = ['Booked', 'Started', 'In progress', 'Completed', 'Cancelled', 'No-show'];
 
 const BOOKING_HEADERS = ['Booking ID', 'Booked at', 'Lesson date', 'Start', 'End', 'Hours', 'Status',
   'Name', 'Phone', 'Email', 'Experience', 'Car', 'Meeting spot', 'Notes', 'Lesson price'];
-const COL = { DATE: 2, START: 3, END: 4, HOURS: 5, STATUS: 6, PHONE: 8 }; // 0-based indexes
+const COL = { DATE: 2, START: 3, END: 4, HOURS: 5, STATUS: 6, PHONE: 8, EMAIL: 9 }; // 0-based indexes
 
 const EXPERIENCE = {
   never: 'Has never driven',
@@ -55,7 +62,7 @@ const EXPERIENCE = {
 };
 const CARS = {
   own: "Student's own car",
-  instructor: SETTINGS.INSTRUCTOR_NAME + "'s car (student covers fuel)",
+  instructor: "Instructor's car (student covers fuel)",
 };
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -83,7 +90,7 @@ function setup() {
   bookings.getRange('C:E').setNumberFormat('@');   // dates and times stored as plain text
   bookings.getRange('I:I').setNumberFormat('@');   // phone numbers stored as plain text
   const statusRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(['Booked', 'Completed', 'Cancelled', 'No-show'], true)
+    .requireValueInList(STATUSES, true)
     .setAllowInvalid(true)
     .build();
   bookings.getRange(2, COL.STATUS + 1, bookings.getMaxRows() - 1, 1).setDataValidation(statusRule);
@@ -108,6 +115,15 @@ function setup() {
   off.getRange('A:D').setNumberFormat('@');
   off.getRange('A1').setNote('Type dates like 2026-10-05. Leave From/To blank to block the whole day. Fill "Through date" to block several days in a row.');
 
+  const settings = ensureSheet_(ss, SHEET_SETTINGS, ['Setting', 'Value']);
+  if (settings.getLastRow() < 2) {
+    settings.getRange(2, 1, 2, 2).setValues([
+      ['Rate per hour', SETTINGS.RATE_PER_HOUR],
+      ['First-lesson discount percent', SETTINGS.FIRST_LESSON_DISCOUNT_PERCENT],
+    ]);
+  }
+  settings.getRange('A1').setNote('Change these here, or from the Rates panel on admin.html. The website picks up a change within a minute, no redeploy needed.');
+
   const blank = ss.getSheetByName('Sheet1');
   if (blank && blank.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(blank);
 
@@ -127,6 +143,39 @@ function ensureSheet_(ss, name, headers) {
     sheet.setFrozenRows(1);
   }
   return sheet;
+}
+
+/** Reads the Settings tab. Falls back to the SETTINGS constants if a row is missing (e.g. before setup() has run again). */
+function getSettings_(ss) {
+  const out = { ratePerHour: SETTINGS.RATE_PER_HOUR, discountPercent: SETTINGS.FIRST_LESSON_DISCOUNT_PERCENT };
+  const sheet = ss.getSheetByName(SHEET_SETTINGS);
+  if (!sheet || sheet.getLastRow() < 2) return out;
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+  rows.forEach(function (row) {
+    const key = String(row[0] || '').trim().toLowerCase();
+    const value = Number(row[1]);
+    if (!isFinite(value)) return;
+    if (key === 'rate per hour' && value > 0) out.ratePerHour = value;
+    if (key === 'first-lesson discount percent' && value >= 0 && value <= 100) out.discountPercent = value;
+  });
+  return out;
+}
+
+/** Writes any of {ratePerHour, discountPercent} to the Settings tab, creating it if needed. */
+function setSettings_(ss, patch) {
+  const sheet = ensureSheet_(ss, SHEET_SETTINGS, ['Setting', 'Value']);
+  if (sheet.getLastRow() < 2) {
+    sheet.getRange(2, 1, 2, 2).setValues([
+      ['Rate per hour', SETTINGS.RATE_PER_HOUR],
+      ['First-lesson discount percent', SETTINGS.FIRST_LESSON_DISCOUNT_PERCENT],
+    ]);
+  }
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+  rows.forEach(function (row, i) {
+    const key = String(row[0] || '').trim().toLowerCase();
+    if (key === 'rate per hour' && patch.ratePerHour !== undefined) sheet.getRange(i + 2, 2).setValue(patch.ratePerHour);
+    if (key === 'first-lesson discount percent' && patch.discountPercent !== undefined) sheet.getRange(i + 2, 2).setValue(patch.discountPercent);
+  });
 }
 
 /* ============================ WEB APP ===================================== */
@@ -149,8 +198,19 @@ function doGet(e) {
       if (to > lastDay) to = lastDay;
       if (to < from) to = from;
 
+      const settings = getSettings_(ss);
       const days = getAvailability_(ss, tz, from, to, readBookings_(ss, tz));
-      return json_({ ok: true, timezone: tz, slotMinutes: SETTINGS.SLOT_MINUTES, from: from, to: to, days: days });
+      return json_({
+        ok: true, timezone: tz, slotMinutes: SETTINGS.SLOT_MINUTES, from: from, to: to, days: days,
+        ratePerHour: settings.ratePerHour, discountPercent: settings.discountPercent,
+      });
+    }
+
+    if (action === 'admin_bookings') {
+      if (!isAdmin_(p.key)) return json_({ ok: false, error: 'FORBIDDEN', message: 'Wrong admin key.' });
+      const ss = ss_();
+      const tz = ss.getSpreadsheetTimeZone();
+      return json_({ ok: true, statuses: STATUSES, settings: getSettings_(ss), bookings: readAllBookings_(ss, tz) });
     }
 
     return json_({ ok: false, error: 'UNKNOWN_ACTION', message: 'Unknown request.' });
@@ -169,6 +229,10 @@ function doPost(e) {
       return json_({ ok: false, error: 'BAD_REQUEST', message: 'The booking request could not be read. Refresh the page and try again.' });
     }
 
+    if (data.action === 'admin_update_status') return adminUpdateStatus_(data);
+    if (data.action === 'admin_set_rates') return adminSetRates_(data);
+    if (data.action === 'admin_add_timeoff') return adminAddTimeOff_(data);
+
     if (data.action !== 'book') return json_({ ok: false, error: 'UNKNOWN_ACTION', message: 'Unknown request.' });
 
     // Spam trap: bots fill in the hidden "website" field. Pretend it worked, save nothing.
@@ -176,7 +240,8 @@ function doPost(e) {
 
     const ss = ss_();
     const tz = ss.getSpreadsheetTimeZone();
-    const checked = validate_(data, tz);
+    const settings = getSettings_(ss);
+    const checked = validate_(data, tz, settings.ratePerHour);
     if (checked.error) return json_({ ok: false, error: 'INVALID', message: checked.error });
     const b = checked.booking;
 
@@ -204,6 +269,11 @@ function doPost(e) {
         if (free.indexOf(hhmm_(b.startMin + i * SETTINGS.SLOT_MINUTES)) === -1) {
           return json_({ ok: false, error: 'SLOT_TAKEN', message: 'That time was just booked by someone else. Pick another time.' });
         }
+      }
+
+      if (settings.discountPercent > 0 && !hasPriorBooking_(ss, b.phoneDigits, b.email)) {
+        b.price = Math.round(b.price * (100 - settings.discountPercent)) / 100;
+        b.discountApplied = true;
       }
 
       bookingId = makeId_(tz);
@@ -235,7 +305,7 @@ function doPost(e) {
       try { emailCustomer_(b, bookingId); } catch (mailErr) { console.error('Customer email failed: ' + mailErr); }
     }
 
-    return json_({ ok: true, bookingId: bookingId, date: b.date, start: b.start, end: b.end, hours: b.hours });
+    return json_({ ok: true, bookingId: bookingId, date: b.date, start: b.start, end: b.end, hours: b.hours, price: b.price, discountApplied: !!b.discountApplied });
   } catch (err) {
     console.error(err);
     return json_({ ok: false, error: 'SERVER_ERROR', message: 'The booking didn\'t go through because of a problem on our side. Try again in a minute.' });
@@ -336,7 +406,7 @@ function readBookings_(ss, tz) {
 
 /* ============================ VALIDATION ================================== */
 
-function validate_(d, tz) {
+function validate_(d, tz, ratePerHour) {
   const clean = function (v, max) {
     return String(v === undefined || v === null ? '' : v)
       .replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, '')
@@ -381,7 +451,7 @@ function validate_(d, tz) {
       end: hhmm_(startMin + hours * 60),
       experience: d.experience,
       vehicle: d.vehicle,
-      price: hours * SETTINGS.RATE_PER_HOUR,
+      price: hours * ratePerHour,
     },
   };
 }
@@ -389,6 +459,94 @@ function validate_(d, tz) {
 /** Stops text that starts with = + - @ from being treated as a spreadsheet formula */
 function safe_(text) {
   return /^[=+\-@]/.test(text) ? "'" + text : text;
+}
+
+/* ============================ ADMIN ========================================
+   Powers admin.html. Every admin request must carry the right "key" (README
+   Part 3). While SETTINGS.ADMIN_KEY is blank, every admin request is refused.
+   ========================================================================== */
+
+function isAdmin_(key) {
+  return !!SETTINGS.ADMIN_KEY && String(key || '') === SETTINGS.ADMIN_KEY;
+}
+
+/** Every booking (any status), most recent lesson date first, for the admin page. */
+function readAllBookings_(ss, tz) {
+  const sheet = ss.getSheetByName(SHEET_BOOKINGS);
+  if (!sheet) return [];
+  const count = sheet.getLastRow() - 1;
+  if (count < 1) return [];
+  const display = sheet.getRange(2, 1, count, BOOKING_HEADERS.length).getDisplayValues();
+  const list = display.map(function (row) {
+    return {
+      bookingId: row[0], bookedAt: row[1], date: row[2], start: row[3], end: row[4],
+      hours: Number(row[5]) || 0, status: row[6], name: row[7], phone: row[8], email: row[9],
+      experience: row[10], car: row[11], meetingSpot: row[12], notes: row[13], price: Number(row[14]) || 0,
+    };
+  });
+  list.sort(function (a, b) { return a.date === b.date ? a.start.localeCompare(b.start) : b.date.localeCompare(a.date); });
+  return list;
+}
+
+/** True if this phone or email already has a booking on file (any status). Used for the first-lesson discount. */
+function hasPriorBooking_(ss, phoneDigits, email) {
+  const sheet = ss.getSheetByName(SHEET_BOOKINGS);
+  const count = sheet.getLastRow() - 1;
+  if (count < 1) return false;
+  const values = sheet.getRange(2, 1, count, BOOKING_HEADERS.length).getValues();
+  const emailLower = String(email || '').toLowerCase();
+  return values.some(function (row) {
+    const rowPhone = String(row[COL.PHONE]).replace(/\D/g, '');
+    const rowEmail = String(row[COL.EMAIL]).toLowerCase();
+    return (phoneDigits && rowPhone === phoneDigits) || (emailLower && rowEmail === emailLower);
+  });
+}
+
+function adminUpdateStatus_(data) {
+  if (!isAdmin_(data.key)) return json_({ ok: false, error: 'FORBIDDEN', message: 'Wrong admin key.' });
+  const status = String(data.status || '');
+  if (STATUSES.indexOf(status) === -1) return json_({ ok: false, error: 'INVALID', message: 'Not a valid status.' });
+  const ss = ss_();
+  const sheet = ss.getSheetByName(SHEET_BOOKINGS);
+  const count = sheet.getLastRow() - 1;
+  if (count < 1) return json_({ ok: false, error: 'NOT_FOUND', message: 'That booking was not found.' });
+  const ids = sheet.getRange(2, 1, count, 1).getValues();
+  for (let i = 0; i < count; i++) {
+    if (ids[i][0] === data.bookingId) {
+      sheet.getRange(i + 2, COL.STATUS + 1).setValue(status);
+      return json_({ ok: true });
+    }
+  }
+  return json_({ ok: false, error: 'NOT_FOUND', message: 'That booking was not found.' });
+}
+
+function adminSetRates_(data) {
+  if (!isAdmin_(data.key)) return json_({ ok: false, error: 'FORBIDDEN', message: 'Wrong admin key.' });
+  const rate = Number(data.ratePerHour);
+  const discount = Number(data.discountPercent);
+  const patch = {};
+  if (isFinite(rate) && rate > 0) patch.ratePerHour = rate;
+  if (isFinite(discount) && discount >= 0 && discount <= 100) patch.discountPercent = discount;
+  if (!('ratePerHour' in patch) && !('discountPercent' in patch)) {
+    return json_({ ok: false, error: 'INVALID', message: 'Enter a rate above 0 and a discount between 0 and 100.' });
+  }
+  const ss = ss_();
+  setSettings_(ss, patch);
+  return json_({ ok: true, settings: getSettings_(ss) });
+}
+
+function adminAddTimeOff_(data) {
+  if (!isAdmin_(data.key)) return json_({ ok: false, error: 'FORBIDDEN', message: 'Wrong admin key.' });
+  const date = String(data.date || '');
+  if (!isDateKey_(date)) return json_({ ok: false, error: 'INVALID', message: 'Pick a date.' });
+  const through = isDateKey_(data.throughDate) ? data.throughDate : '';
+  const from = String(data.from || '').trim();
+  const to = String(data.to || '').trim();
+  const note = String(data.note || '').slice(0, 200);
+  const ss = ss_();
+  const sheet = ensureSheet_(ss, SHEET_TIME_OFF, ['Date', 'Through date', 'From', 'To', 'Note']);
+  sheet.appendRow([date, through, from, to, note]);
+  return json_({ ok: true });
 }
 
 /* ============================ ALERTS ====================================== */
@@ -434,7 +592,8 @@ function alertText_(b, bookingId) {
     'Meeting spot: ' + (b.meetingSpot || 'Not given'),
   ];
   if (b.notes) lines.push('Notes: ' + b.notes);
-  lines.push('', 'Due on lesson day: $' + b.price + (b.vehicle === 'instructor' ? ' + fuel' : ''), 'Ref: ' + bookingId);
+  lines.push('', 'Due on lesson day: ' + money_(b.price) + (b.vehicle === 'instructor' ? ' + fuel' : '') +
+    (b.discountApplied ? ' (first-lesson discount already applied)' : ''), 'Ref: ' + bookingId);
   return lines.join('\n');
 }
 
@@ -504,12 +663,13 @@ function emailCustomer_(b, bookingId) {
     '',
     'When: ' + prettyDate_(b.date) + ', ' + prettyTime_(b.startMin) + ' \u2013 ' + prettyTime_(b.startMin + b.hours * 60),
     'Length: ' + b.hours + (b.hours === 1 ? ' hour' : ' hours'),
-    'Car: ' + (b.vehicle === 'own' ? 'Your own car' : SETTINGS.INSTRUCTOR_NAME + '\'s car'),
+    'Car: ' + (b.vehicle === 'own' ? 'Your own car' : "The instructor's car"),
     'Meeting spot: ' + (b.meetingSpot || SETTINGS.INSTRUCTOR_NAME + ' will confirm this with you'),
     '',
     'Before your lesson:',
     '- Bring your valid learner\'s permit.',
-    '- Payment of $' + b.price + ' is due on the day of your lesson' + (b.vehicle === 'instructor' ? ', plus the cost of fuel.' : '.'),
+    '- Payment of ' + money_(b.price) + ' is due on the day of your lesson' + (b.vehicle === 'instructor' ? ', plus the cost of fuel.' : '.') +
+      (b.discountApplied ? ' Your first-lesson discount is already included in that price.' : ''),
     b.vehicle === 'own' ? '- Make sure your car is registered and insured.' : '',
     '',
     'Need to change something? Just reply to this email.',
@@ -574,6 +734,11 @@ function json_(obj) {
 }
 
 function pad_(n) { return (Number(n) < 10 ? '0' : '') + Number(n); }
+/** $25 for whole amounts, $12.50 when there are cents (e.g. after a discount) */
+function money_(n) {
+  const v = Number(n) || 0;
+  return '$' + (v % 1 === 0 ? String(v) : v.toFixed(2));
+}
 function hhmm_(mins) { return pad_(Math.floor(mins / 60)) + ':' + pad_(mins % 60); }
 function isDateKey_(s) { return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s); }
 function todayKey_(tz) { return Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd'); }

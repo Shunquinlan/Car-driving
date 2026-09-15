@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Drive with Shun — Admin</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* ------------------------------------------------------------------------
+     Admin-only styles. Not linked from the site nav — this page is meant to
+     be bookmarked privately by the instructor. See README.md, Part 3.
+     ------------------------------------------------------------------------ */
+  body { background: var(--concrete); }
+  .admin-shell { max-width: 74rem; margin: 0 auto; padding: clamp(1.25rem, 1rem + 2vw, 2.5rem) var(--gutter) 4rem; }
+  .admin-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.75rem; }
+  .admin-header h1 { font-size: var(--step-2); margin: 0; }
+  .admin-header p { margin: 0.15rem 0 0; color: var(--muted); font-size: var(--step--1); }
+
+  /* ---- Sign-in gate ---- */
+  .gate { max-width: 26rem; margin: 3rem auto; padding: 2rem; background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-panel); }
+  .gate h1 { font-size: var(--step-2); margin: 0 0 0.5rem; }
+  .gate p { color: var(--muted); margin: 0 0 1.25rem; font-size: var(--step--1); }
+  .gate label { display: block; font-weight: 600; margin-bottom: 0.4rem; }
+  .gate input {
+    width: 100%; min-height: 48px; padding: 0.6rem 0.8rem; font: inherit; font-size: 1rem;
+    border: 2px solid var(--line-strong); border-radius: var(--r-control); margin-bottom: 1rem;
+  }
+  .gate .field-error, #login-error { color: var(--danger); font-size: var(--step--1); margin: -0.5rem 0 1rem; min-height: 1.2em; }
+
+  /* ---- Panels ---- */
+  .panel { background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-panel); padding: 1.25rem 1.4rem; margin-bottom: 1.5rem; }
+  .panel h2 { font-size: var(--step-1); margin: 0 0 0.9rem; }
+  .panel-grid { display: grid; gap: 1.25rem; grid-template-columns: 1fr; }
+  @media (min-width: 860px) { .panel-grid { grid-template-columns: 1fr 1fr; } }
+
+  .field { margin-bottom: 0.9rem; }
+  .field label { display: block; font-weight: 600; font-size: var(--step--1); margin-bottom: 0.3rem; }
+  .field input, .field select {
+    width: 100%; min-height: 44px; padding: 0.5rem 0.7rem; font: inherit; font-size: 1rem;
+    border: 2px solid var(--line-strong); border-radius: var(--r-control); background: var(--paper);
+  }
+  .field-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+  .field-row .field { flex: 1 1 8rem; }
+  .panel-note { font-size: 0.8125rem; color: var(--muted); margin: 0.4rem 0 0; }
+  .panel-status { font-size: var(--step--1); font-weight: 600; margin-top: 0.6rem; min-height: 1.3em; }
+  .panel-status.is-error { color: var(--danger); }
+  .panel-status.is-ok { color: var(--sign-deep); }
+
+  /* ---- Totals ---- */
+  .totals-row { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+  .totals-row select { min-height: 42px; padding: 0.3rem 0.6rem; border: 2px solid var(--line-strong); border-radius: var(--r-control); font: inherit; }
+  .totals-cards { display: grid; gap: 0.7rem; grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); }
+  .totals-card { background: var(--sign-tint); border-radius: var(--r-control); padding: 0.9rem 1rem; }
+  .totals-card span { display: block; font-size: 0.8125rem; color: var(--sign-deep); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+  .totals-card strong { display: block; font-size: var(--step-2); margin-top: 0.2rem; }
+
+  /* ---- Bookings table ---- */
+  .table-toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: space-between; margin-bottom: 0.9rem; }
+  .table-scroll { overflow-x: auto; }
+  table.bookings { width: 100%; border-collapse: collapse; font-size: var(--step--1); min-width: 62rem; }
+  table.bookings th, table.bookings td { padding: 0.6rem 0.7rem; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  table.bookings th { background: var(--concrete); position: sticky; top: 0; }
+  table.bookings td.wrap { white-space: normal; min-width: 10rem; }
+  table.bookings tr.is-cancelled td { color: var(--muted); text-decoration: line-through; }
+  table.bookings select.status-select {
+    min-height: 38px; padding: 0.2rem 0.5rem; border: 2px solid var(--line-strong); border-radius: var(--r-control); font: inherit; font-size: 0.85rem;
+  }
+  .discount-tag { display: inline-block; margin-left: 0.35rem; padding: 0.1rem 0.4rem; border-radius: 999px; background: var(--caution-tint); color: var(--asphalt); font-size: 0.7rem; font-weight: 700; }
+  .empty-note { padding: 1.5rem 0; text-align: center; color: var(--muted); }
+  #sign-out { margin-left: auto; }
+</style>
+</head>
+<body>
+
+<main class="admin-shell">
+  <!-- ===== Sign-in gate ===== -->
+  <section id="gate" class="gate">
+    <h1>Admin sign-in</h1>
+    <p>Enter the admin key you set as <code>ADMIN_KEY</code> in Code.gs (README, Part 3).</p>
+    <form id="login-form">
+      <label for="login-key">Admin key</label>
+      <input id="login-key" type="password" autocomplete="off" required>
+      <p id="login-error"></p>
+      <button type="submit" class="btn btn-caution btn-block">Sign in</button>
+    </form>
+  </section>
+
+  <!-- ===== Dashboard (hidden until signed in) ===== -->
+  <div id="dashboard" hidden>
+    <div class="admin-header">
+      <div>
+        <h1>Drive with Shun — Admin</h1>
+        <p id="admin-sub">Rates, blocked time and bookings.</p>
+      </div>
+      <div style="display:flex; gap:0.6rem;">
+        <button type="button" class="btn btn-outline" id="refresh-btn">Refresh</button>
+        <button type="button" class="btn btn-outline" id="sign-out">Sign out</button>
+      </div>
+    </div>
+
+    <div class="panel-grid">
+      <!-- Rates -->
+      <section class="panel">
+        <h2>Rate and first-lesson discount</h2>
+        <form id="rates-form">
+          <div class="field-row">
+            <div class="field">
+              <label for="rate-input">Rate per hour ($)</label>
+              <input id="rate-input" type="number" min="1" step="0.5" required>
+            </div>
+            <div class="field">
+              <label for="discount-input">First-lesson discount (%)</label>
+              <input id="discount-input" type="number" min="0" max="100" step="1" required>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-go">Save rate</button>
+          <p class="panel-status" id="rates-status"></p>
+          <p class="panel-note">This is how much you're charging per hour, and the discount new students get on their first lesson. The website picks up a change within about a minute.</p>
+        </form>
+      </section>
+
+      <!-- Block time -->
+      <section class="panel">
+        <h2>Close a date or time</h2>
+        <form id="timeoff-form">
+          <div class="field-row">
+            <div class="field">
+              <label for="off-date">Date</label>
+              <input id="off-date" type="date" required>
+            </div>
+            <div class="field">
+              <label for="off-through">Through (optional)</label>
+              <input id="off-through" type="date">
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="off-from">From (optional)</label>
+              <input id="off-from" type="time">
+            </div>
+            <div class="field">
+              <label for="off-to">To (optional)</label>
+              <input id="off-to" type="time">
+            </div>
+          </div>
+          <div class="field">
+            <label for="off-note">Note (optional)</label>
+            <input id="off-note" type="text" maxlength="200" placeholder="e.g. Dentist appointment">
+          </div>
+          <button type="submit" class="btn btn-go">Block this time</button>
+          <p class="panel-status" id="timeoff-status"></p>
+          <p class="panel-note">Leave From/To blank to close the whole day. Fill in Through to close several days in a row.</p>
+        </form>
+      </section>
+    </div>
+
+    <!-- Totals -->
+    <section class="panel">
+      <h2>Money</h2>
+      <div class="totals-row">
+        <label for="totals-range" style="font-weight:600; font-size: var(--step--1);">Show</label>
+        <select id="totals-range"></select>
+      </div>
+      <div class="totals-cards">
+        <div class="totals-card"><span>Lessons</span><strong id="t-count">0</strong></div>
+        <div class="totals-card"><span>Hours</span><strong id="t-hours">0</strong></div>
+        <div class="totals-card"><span>Expected</span><strong id="t-expected">$0</strong></div>
+        <div class="totals-card"><span>Collected</span><strong id="t-collected">$0</strong></div>
+      </div>
+      <p class="panel-note">Expected totals every lesson that isn't cancelled. Collected only counts lessons marked Completed. Cancelled and no-show lessons are never counted.</p>
+    </section>
+
+    <!-- Bookings -->
+    <section class="panel">
+      <div class="table-toolbar">
+        <h2 style="margin:0;">Bookings</h2>
+        <select id="status-filter"></select>
+      </div>
+      <p class="panel-note" style="margin-bottom:0.6rem;">On a phone, swipe the table sideways to see every column.</p>
+      <div class="table-scroll">
+        <table class="bookings">
+          <thead>
+            <tr>
+              <th>Date</th><th>Time</th><th>Hrs</th><th>Name</th><th>Phone</th><th class="wrap">Email</th>
+              <th>Car</th><th>Price</th><th>Status</th><th class="wrap">Notes</th>
+            </tr>
+          </thead>
+          <tbody id="bookings-body"></tbody>
+        </table>
+        <p class="empty-note" id="empty-note" hidden>No bookings yet.</p>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  // The only line you should need to edit: same Apps Script URL as in script.js.
+  const API_URL = '';
+
+  const $ = (id) => document.getElementById(id);
+  const gate = $('gate'), dashboard = $('dashboard');
+  const money = (n) => '$' + (Math.round(Number(n) * 100) / 100).toFixed(2).replace(/\.00$/, '');
+
+  let KEY = sessionStorage.getItem('dws_admin_key') || '';
+  let statuses = ['Booked', 'Started', 'In progress', 'Completed', 'Cancelled', 'No-show'];
+  let bookings = [];
+
+  function apiUrl() {
+    return API_URL.trim();
+  }
+
+  async function call(params, options) {
+    const base = apiUrl();
+    if (!base) throw new Error('NO_API_URL');
+    const url = new URL(base);
+    if (!options) {
+      Object.keys(params).forEach((k) => url.searchParams.set(k, params[k]));
+      const res = await fetch(url.toString());
+      return res.json();
+    }
+    const res = await fetch(base, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  }
+
+  /* ---------------- Sign-in ---------------- */
+
+  async function trySignIn(key) {
+    $('login-error').textContent = '';
+    if (!apiUrl()) {
+      $('login-error').textContent = 'This page has no API_URL set yet. Paste the same Apps Script URL used in script.js at the top of this file\u2019s <script>.';
+      return;
+    }
+    let data;
+    try {
+      data = await call({ action: 'admin_bookings', key });
+    } catch (err) {
+      $('login-error').textContent = 'Could not reach the booking system. Check your connection and try again.';
+      return;
+    }
+    if (!data || data.ok !== true) {
+      $('login-error').textContent = (data && data.message) || 'That key was not accepted.';
+      return;
+    }
+    KEY = key;
+    sessionStorage.setItem('dws_admin_key', key);
+    statuses = data.statuses || statuses;
+    bookings = data.bookings || [];
+    populateFilters();
+    applySettings(data.settings || {});
+    renderBookings();
+    renderTotals();
+    gate.hidden = true;
+    dashboard.hidden = false;
+  }
+
+  $('login-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    trySignIn($('login-key').value.trim());
+  });
+
+  $('sign-out').addEventListener('click', () => {
+    sessionStorage.removeItem('dws_admin_key');
+    KEY = '';
+    dashboard.hidden = true;
+    gate.hidden = false;
+    $('login-key').value = '';
+    $('login-key').focus();
+  });
+
+  /* ---------------- Rates ---------------- */
+
+  function applySettings(settings) {
+    if (settings.ratePerHour) $('rate-input').value = settings.ratePerHour;
+    if (settings.discountPercent !== undefined) $('discount-input').value = settings.discountPercent;
+  }
+
+  $('rates-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const status = $('rates-status');
+    status.className = 'panel-status';
+    status.textContent = 'Saving\u2026';
+    try {
+      const data = await call({
+        action: 'admin_set_rates', key: KEY,
+        ratePerHour: Number($('rate-input').value),
+        discountPercent: Number($('discount-input').value),
+      }, true);
+      if (!data.ok) throw new Error(data.message || 'Could not save.');
+      status.className = 'panel-status is-ok';
+      status.textContent = 'Saved. The website will use the new rate within a minute.';
+    } catch (err) {
+      status.className = 'panel-status is-error';
+      status.textContent = err.message || 'Could not save. Try again.';
+    }
+  });
+
+  /* ---------------- Block time ---------------- */
+
+  $('timeoff-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const status = $('timeoff-status');
+    status.className = 'panel-status';
+    status.textContent = 'Saving\u2026';
+    try {
+      const data = await call({
+        action: 'admin_add_timeoff', key: KEY,
+        date: $('off-date').value, throughDate: $('off-through').value,
+        from: $('off-from').value, to: $('off-to').value, note: $('off-note').value,
+      }, true);
+      if (!data.ok) throw new Error(data.message || 'Could not save.');
+      status.className = 'panel-status is-ok';
+      status.textContent = 'Blocked. Refresh the calendar on the website to see it.';
+      $('timeoff-form').reset();
+    } catch (err) {
+      status.className = 'panel-status is-error';
+      status.textContent = err.message || 'Could not save. Try again.';
+    }
+  });
+
+  /* ---------------- Bookings table + totals ---------------- */
+
+  function populateFilters() {
+    const statusSel = $('status-filter');
+    statusSel.replaceChildren(new Option('All statuses', ''), ...statuses.map((s) => new Option(s, s)));
+
+    const months = Array.from(new Set(bookings.map((b) => b.date.slice(0, 7)))).sort().reverse();
+    const rangeSel = $('totals-range');
+    rangeSel.replaceChildren(
+      new Option('All time', ''),
+      ...months.map((m) => new Option(new Date(m + '-02').toLocaleDateString(undefined, { month: 'long', year: 'numeric' }), m))
+    );
+    if (months.length) rangeSel.value = months[0];
+  }
+
+  function renderTotals() {
+    const range = $('totals-range').value;
+    const rows = range ? bookings.filter((b) => b.date.slice(0, 7) === range) : bookings;
+    const notCancelled = rows.filter((b) => !/cancelled|canceled|no-show/i.test(b.status));
+    const completed = rows.filter((b) => /^completed$/i.test(b.status));
+    $('t-count').textContent = notCancelled.length;
+    $('t-hours').textContent = notCancelled.reduce((sum, b) => sum + b.hours, 0);
+    $('t-expected').textContent = money(notCancelled.reduce((sum, b) => sum + b.price, 0));
+    $('t-collected').textContent = money(completed.reduce((sum, b) => sum + b.price, 0));
+  }
+
+  async function updateStatus(bookingId, status, selectEl) {
+    selectEl.disabled = true;
+    try {
+      const data = await call({ action: 'admin_update_status', key: KEY, bookingId, status }, true);
+      if (!data.ok) throw new Error(data.message || 'Could not update.');
+      const b = bookings.find((x) => x.bookingId === bookingId);
+      if (b) b.status = status;
+      renderTotals();
+      if ($('status-filter').value) {
+        renderBookings();   // the row may no longer match the active filter
+      } else {
+        selectEl.closest('tr').classList.toggle('is-cancelled', /cancelled|canceled/i.test(status));
+      }
+    } catch (err) {
+      alert(err.message || 'Could not update that booking.');
+      selectEl.value = bookings.find((x) => x.bookingId === bookingId).status;
+    } finally {
+      selectEl.disabled = false;
+    }
+  }
+
+  function renderBookings() {
+    const filter = $('status-filter').value;
+    const rows = filter ? bookings.filter((b) => b.status === filter) : bookings;
+    const body = $('bookings-body');
+    body.replaceChildren();
+    $('empty-note').hidden = rows.length > 0;
+
+    rows.forEach((b) => {
+      const tr = document.createElement('tr');
+      if (/cancelled|canceled/i.test(b.status)) tr.classList.add('is-cancelled');
+
+      const cell = (text) => { const td = document.createElement('td'); td.textContent = text; return td; };
+      tr.appendChild(cell(b.date));
+      tr.appendChild(cell(b.start + '\u2013' + b.end));
+      tr.appendChild(cell(b.hours));
+      tr.appendChild(cell(b.name));
+      tr.appendChild(cell(b.phone));
+      const emailCell = cell(b.email); emailCell.className = 'wrap'; tr.appendChild(emailCell);
+      tr.appendChild(cell(b.car));
+      tr.appendChild(cell(money(b.price)));
+
+      const statusTd = document.createElement('td');
+      const sel = document.createElement('select');
+      sel.className = 'status-select';
+      statuses.forEach((s) => sel.appendChild(new Option(s, s, false, s === b.status)));
+      sel.addEventListener('change', () => updateStatus(b.bookingId, sel.value, sel));
+      statusTd.appendChild(sel);
+      tr.appendChild(statusTd);
+
+      const notesCell = cell(b.notes || ''); notesCell.className = 'wrap'; tr.appendChild(notesCell);
+      body.appendChild(tr);
+    });
+  }
+
+  $('status-filter').addEventListener('change', renderBookings);
+  $('totals-range').addEventListener('change', renderTotals);
+  $('refresh-btn').addEventListener('click', () => trySignIn(KEY));
+
+  // Auto-sign-in if a key is already saved for this browser tab
+  if (KEY) {
+    $('login-key').value = KEY;
+    trySignIn(KEY);
+  }
+})();
+</script>
+</body>
+</html>
