@@ -17,7 +17,7 @@
   const CONFIG = {
     // Paste your Google Apps Script Web App URL here. It ends with /exec.
     // While this is empty, the calendar runs in preview mode with sample times.
-    API_URL: '',
+    API_URL: 'https://script.google.com/macros/s/AKfycbzFaYgdGc0iAjJLaETWELtVIXL2AcuW01K5nVDM0S3UoAa6TYego-fNioTcFuAK5JHg/exec',
 
     INSTRUCTOR_NAME: 'Shun',
     RATE_PER_HOUR: 25,        // starting rate; the real rate comes from the backend once it's connected
