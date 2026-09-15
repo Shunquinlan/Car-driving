@@ -22,7 +22,7 @@
 const SETTINGS = {
   BUSINESS_NAME: 'Drive with Shun',
   INSTRUCTOR_NAME: 'Shun',
-  OWNER_EMAIL: '',              // where alerts go. Blank = the Google account that owns this script
+  OWNER_EMAIL: '50dollarrental@gmail.com',              // where alerts go. Blank = the Google account that owns this script
   RATE_PER_HOUR: 25,            // starting rate. Change it any time from the Settings tab or admin.html, no redeploy needed
   FIRST_LESSON_DISCOUNT_PERCENT: 50, // starting first-lesson discount. Same as above, editable later
   SLOT_MINUTES: 60,             // keep in sync with script.js
@@ -31,7 +31,7 @@ const SETTINGS = {
   MAX_DAYS_AHEAD: 60,           // no bookings further out than this
   MAX_UPCOMING_PER_PERSON: 3,   // stops one phone number from grabbing every slot
   SEND_CUSTOMER_EMAIL: true,    // email the student a confirmation
-  ADMIN_KEY: '',                // set a private password here before using admin.html (README Part 3)
+  ADMIN_KEY: '123454321',                // set a private password here before using admin.html (README Part 3)
 
   // ---- Instant alerts to Shun's phone (README Part 2). Blank = turned off ----
   EMAIL_ALERTS: true,           // Gmail app push notification
