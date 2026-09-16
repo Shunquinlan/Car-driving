@@ -100,6 +100,7 @@ owns the bookings and receives the alerts.
 | **Hours** | Shun's regular weekly teaching hours |
 | **Time Off** | Days or hours when Shun isn't available |
 | **Settings** | The hourly rate and the first-lesson discount percentage |
+| **Reviews** | Feedback sent from the website. Nothing appears publicly until you publish it |
 
 You can change the rate and discount here, or from `admin.html` — they're the same
 two numbers. The website picks up a change within about a minute, with no redeploy.
@@ -289,6 +290,7 @@ There's also a **Sign out** button.
 
 | Panel | What it's for |
 | --- | --- |
+| **Feedback** | Every review students send. Set one to **Published** and it appears on the website; **Hidden** takes it back down |
 | **Rate and first-lesson discount** | Type what you're charging per hour and the discount percentage, then **Save rate**. The website uses the new numbers within about a minute |
 | **Close a date or time** | Block a day, a run of days, or just a few hours — without opening the Sheet. Those times disappear from the booking calendar |
 | **Money** | Pick a month (or **All time**) and see your lesson count, total hours, **Expected** (every lesson still on the books) and **Collected** (only lessons marked `Completed`) |
@@ -303,6 +305,32 @@ earned, and **Expected** minus **Collected** is roughly what's still owed to you
 > **Keep the admin key private.** Anyone with the key and the page address can see
 > every student's name, phone number and email. If you ever think it's been seen,
 > change `ADMIN_KEY` in `Code.gs`, redeploy a new version, and update `admin.html`.
+
+---
+
+### Step 3: Reviews and feedback
+
+There's a **Leave your feedback** button in the "What students say" section. Students
+fill in a first name, a 1-5 rating, what they were working on, and their comments.
+
+**Nothing publishes itself.** Every review arrives as **Pending** and only appears on
+the site when you set it to **Published** from the Feedback panel (or the Reviews tab).
+You get an alert on your phone each time one comes in, the same way you do for bookings.
+
+There's a tick-box on the form: *"Shun may show this on the website with my first name."*
+If a student leaves it unticked, that review is marked **Private** and the Publish option
+is greyed out — you can read it, but you can't put it on the site. Only first names are
+ever shown; no phone numbers or email addresses.
+
+Until you publish your first review, the site shows the three reviews written into
+`index.html`. As soon as one is published, those are replaced automatically.
+
+> **About the placeholder reviews.** Bhomika's review is real. The other two are
+> made-up examples and are labelled "Sample review" on the page so nobody mistakes
+> them for real testimonials. Delete them, or replace them with real quotes and
+> remove their `<span class="sample-tag">` line. Publishing invented testimonials as
+> though they were real is both misleading to students and, in the US, against FTC
+> rules on endorsements.
 
 ---
 
@@ -402,3 +430,4 @@ domain** enter it and follow GitHub's instructions for the DNS records. Tick
 - **Booking limits:** minimum notice, maximum days ahead, and a cap on upcoming lessons per phone number.
 - **Admin access is key-protected:** every admin request is checked against `ADMIN_KEY`, and while that's blank the dashboard refuses to open at all.
 - **The discount can't be farmed:** it's decided by the server against your booking history, not by anything the student can type in.
+- **No review goes live on its own:** every one waits for you, and one without the student's permission can't be published at all.

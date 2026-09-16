@@ -72,6 +72,19 @@
   }
   .discount-tag { display: inline-block; margin-left: 0.35rem; padding: 0.1rem 0.4rem; border-radius: 999px; background: var(--caution-tint); color: var(--asphalt); font-size: 0.7rem; font-weight: 700; }
   .empty-note { padding: 1.5rem 0; text-align: center; color: var(--muted); }
+
+  /* ---- Reviews ---- */
+  .review-card { border: 1px solid var(--line); border-radius: var(--r-control); padding: 0.9rem 1rem; margin-bottom: 0.9rem; }
+  .review-card.is-published { border-color: var(--sign); background: var(--sign-tint); }
+  .review-card.is-private { background: var(--concrete); }
+  .review-meta { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; font-size: var(--step--1); margin-bottom: 0.5rem; }
+  .review-meta strong { font-size: var(--step-0); }
+  .review-stars { color: #B8860B; font-weight: 700; letter-spacing: 0.05em; }
+  .review-tag { padding: 0.1rem 0.5rem; border-radius: 999px; background: var(--concrete); font-size: 0.75rem; font-weight: 700; }
+  .review-tag.warn { background: var(--danger-tint); color: var(--danger); }
+  .review-body { margin: 0 0 0.7rem; line-height: 1.5; }
+  .review-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+  .review-actions select { min-height: 38px; padding: 0.2rem 0.5rem; border: 2px solid var(--line-strong); border-radius: var(--r-control); font: inherit; font-size: 0.85rem; }
   #sign-out { margin-left: auto; }
 </style>
 </head>
@@ -195,6 +208,17 @@
         <p class="empty-note" id="empty-note" hidden>No bookings yet.</p>
       </div>
     </section>
+
+    <!-- Reviews -->
+    <section class="panel">
+      <div class="table-toolbar">
+        <h2 style="margin:0;">Feedback</h2>
+        <select id="review-filter"></select>
+      </div>
+      <p class="panel-note" style="margin-bottom:0.8rem;">Set a review to <strong>Published</strong> and it appears on the website within a minute. Anything marked "Private" can't be published — that student didn't agree to it being shown.</p>
+      <div id="reviews-body"></div>
+      <p class="empty-note" id="reviews-empty" hidden>No feedback yet.</p>
+    </section>
   </div>
 </main>
 
@@ -211,7 +235,9 @@
 
   let KEY = sessionStorage.getItem('dws_admin_key') || '';
   let statuses = ['Booked', 'Started', 'In progress', 'Completed', 'Cancelled', 'No-show'];
+  let reviewStatuses = ['Pending', 'Published', 'Hidden'];
   let bookings = [];
+  let reviews = [];
 
   function apiUrl() {
     return API_URL.trim();
@@ -263,7 +289,100 @@
     renderTotals();
     gate.hidden = true;
     dashboard.hidden = false;
+    loadReviews();
   }
+
+  /* ---------------- Reviews ---------------- */
+
+  async function loadReviews() {
+    try {
+      const data = await call({ action: 'admin_reviews', key: KEY });
+      if (!data.ok) return;
+      reviewStatuses = data.reviewStatuses || reviewStatuses;
+      reviews = data.reviews || [];
+      const sel = $('review-filter');
+      sel.replaceChildren(new Option('All feedback', ''), ...reviewStatuses.map((s) => new Option(s, s)));
+      renderReviews();
+    } catch (err) {
+      /* the rest of the dashboard still works */
+    }
+  }
+
+  async function updateReview(reviewId, status, selectEl) {
+    selectEl.disabled = true;
+    try {
+      const data = await call({ action: 'admin_update_review', key: KEY, reviewId, status }, true);
+      if (!data.ok) throw new Error(data.message || 'Could not update.');
+      const r = reviews.find((x) => x.reviewId === reviewId);
+      if (r) r.status = status;
+      renderReviews();
+    } catch (err) {
+      alert(err.message || 'Could not update that review.');
+      selectEl.value = reviews.find((x) => x.reviewId === reviewId).status;
+    } finally {
+      selectEl.disabled = false;
+    }
+  }
+
+  function renderReviews() {
+    const filter = $('review-filter').value;
+    const rows = filter ? reviews.filter((r) => r.status === filter) : reviews;
+    const body = $('reviews-body');
+    body.replaceChildren();
+    $('reviews-empty').hidden = rows.length > 0;
+
+    rows.forEach((r) => {
+      const card = document.createElement('div');
+      card.className = 'review-card';
+      if (/published/i.test(r.status)) card.classList.add('is-published');
+      if (!r.shareable) card.classList.add('is-private');
+
+      const meta = document.createElement('div');
+      meta.className = 'review-meta';
+      const who = document.createElement('strong');
+      who.textContent = r.name;
+      const stars = document.createElement('span');
+      stars.className = 'review-stars';
+      stars.textContent = '\u2605'.repeat(r.rating) + '\u2606'.repeat(Math.max(0, 5 - r.rating));
+      meta.append(who, stars);
+      if (r.label) {
+        const tag = document.createElement('span');
+        tag.className = 'review-tag';
+        tag.textContent = r.label;
+        meta.appendChild(tag);
+      }
+      if (!r.shareable) {
+        const tag = document.createElement('span');
+        tag.className = 'review-tag warn';
+        tag.textContent = 'Private \u2014 cannot be published';
+        meta.appendChild(tag);
+      }
+      const when = document.createElement('span');
+      when.style.color = 'var(--muted)';
+      when.textContent = r.submittedAt;
+      meta.appendChild(when);
+
+      const text = document.createElement('p');
+      text.className = 'review-body';
+      text.textContent = r.text;
+
+      const actions = document.createElement('div');
+      actions.className = 'review-actions';
+      const sel = document.createElement('select');
+      reviewStatuses.forEach((s) => {
+        const opt = new Option(s, s, false, s === r.status);
+        if (s === 'Published' && !r.shareable) opt.disabled = true;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', () => updateReview(r.reviewId, sel.value, sel));
+      actions.appendChild(sel);
+
+      card.append(meta, text, actions);
+      body.appendChild(card);
+    });
+  }
+
+  $('review-filter').addEventListener('change', renderReviews);
 
   $('login-form').addEventListener('submit', (e) => {
     e.preventDefault();

@@ -128,27 +128,100 @@
     </section>
 
     <!-- ===== Reviews =====
-         REPLACE: swap these sample reviews for real ones from your students
-         (with their permission), then delete the <span class="sample-tag"> lines. -->
+         Bhomika's review is real. The other two are placeholders and are marked
+         "Sample review" so visitors can tell them apart — replace them with real
+         quotes (with permission) and delete their <span class="sample-tag"> line.
+         Reviews approved on the admin page replace this whole list automatically. -->
     <section class="section reviews" id="reviews" aria-labelledby="reviews-title">
       <div class="container">
         <h2 id="reviews-title">What students say</h2>
-        <div class="review-list">
+
+        <div class="review-list" id="review-list">
           <figure class="review">
-            <span class="sample-tag">Sample review</span>
-            <blockquote><p>I had never driven and was honestly scared. Shun started me in an empty lot and never rushed me. A few weeks later I merged onto the highway during rush hour and stayed calm.</p></blockquote>
-            <figcaption>Student name <span>Started as a complete beginner</span></figcaption>
+            <blockquote><p>Had a great experience learning as a new driver! I had driven before but I was quite nervous when I had to drive in busy streets. Shun helped me stay calm, guided me and with practice driving has never been so fun and easy! Definitely recommend to someone who is new at driving or someone who needs more practice to get their driver's license!!!</p></blockquote>
+            <figcaption>Bhomika <span>Nervous in busy streets</span></figcaption>
           </figure>
           <figure class="review">
             <span class="sample-tag">Sample review</span>
-            <blockquote><p>I'd had my permit for a year but avoided downtown completely. After a few lessons focused on city traffic, lane changes don't scare me anymore.</p></blockquote>
-            <figcaption>Student name <span>Nervous in city traffic</span></figcaption>
+            <blockquote><p>I didn't know the first thing about a car &mdash; not even how to adjust the mirrors. Shun started from absolute zero and never made me feel silly for asking. Now I drive on my own, calmly and with real confidence.</p></blockquote>
+            <figcaption>Student name <span>Started knowing nothing about cars</span></figcaption>
           </figure>
           <figure class="review">
             <span class="sample-tag">Sample review</span>
             <blockquote><p>Shun explains everything before you do it. No yelling, no sighing, just clear steps. I finally feel ready to drive on my own.</p></blockquote>
-            <figcaption>Student name <span>Preparing for the road test</span></figcaption>
+            <figcaption>Sree <span>Preparing for the road test</span></figcaption>
           </figure>
+        </div>
+
+        <!-- ---- Leave your own feedback ---- -->
+        <div class="feedback">
+          <button type="button" class="btn btn-caution" id="feedback-open" aria-expanded="false" aria-controls="feedback-panel">
+            Leave your feedback
+          </button>
+
+          <div class="feedback-panel" id="feedback-panel" hidden>
+            <h3 id="feedback-title">How did your lesson go?</h3>
+            <p class="feedback-intro">Shun reads every message. With your permission, your words may appear on this page &mdash; only your first name is ever shown.</p>
+
+            <form id="feedback-form" novalidate>
+              <div class="field">
+                <label for="fb-name">Your first name</label>
+                <input type="text" id="fb-name" name="name" autocomplete="given-name" maxlength="40" required>
+                <p class="field-error" id="fb-name-error" hidden></p>
+              </div>
+
+              <fieldset class="rating">
+                <legend>How would you rate your lessons? <span class="rating-hint">1 = poor, 5 = excellent</span></legend>
+                <div class="rating-options">
+                  <label class="rating-choice"><input type="radio" name="rating" value="1"><span>1</span></label>
+                  <label class="rating-choice"><input type="radio" name="rating" value="2"><span>2</span></label>
+                  <label class="rating-choice"><input type="radio" name="rating" value="3"><span>3</span></label>
+                  <label class="rating-choice"><input type="radio" name="rating" value="4"><span>4</span></label>
+                  <label class="rating-choice"><input type="radio" name="rating" value="5" checked><span>5</span></label>
+                </div>
+              </fieldset>
+
+              <div class="field">
+                <label for="fb-label">Where were you starting from?</label>
+                <select id="fb-label" name="label">
+                  <option value="">Choose the closest option</option>
+                  <option value="Started as a complete beginner">I'd never driven before</option>
+                  <option value="Started knowing nothing about cars">I knew nothing about cars</option>
+                  <option value="Nervous in busy streets">I was nervous in busy streets</option>
+                  <option value="Preparing for the road test">I was preparing for the road test</option>
+                  <option value="Building highway confidence">I wanted highway practice</option>
+                </select>
+              </div>
+
+              <div class="field">
+                <label for="fb-text">Your feedback</label>
+                <textarea id="fb-text" name="review" rows="5" maxlength="700" required></textarea>
+                <p class="field-hint"><span id="fb-count">0</span>/700</p>
+                <p class="field-error" id="fb-text-error" hidden></p>
+              </div>
+
+              <div class="field checkbox-field">
+                <label class="checkbox">
+                  <input type="checkbox" id="fb-consent" name="consent">
+                  <span>Shun may show this on the website with my first name.</span>
+                </label>
+              </div>
+
+              <!-- Spam trap: hidden from people, filled in by bots -->
+              <div class="hp" aria-hidden="true">
+                <label for="fb-website">Website</label>
+                <input type="text" id="fb-website" name="website" tabindex="-1" autocomplete="off">
+              </div>
+
+              <button type="submit" class="btn btn-go btn-large" id="fb-submit">Send feedback</button>
+              <p class="feedback-status" id="fb-status" role="alert"></p>
+            </form>
+          </div>
+
+          <div class="feedback-thanks sign" id="feedback-thanks" hidden>
+            <h3>Thank you.</h3>
+            <p>Shun has your feedback. If you said she could share it, it may appear on this page once she's read it.</p>
+          </div>
         </div>
       </div>
     </section>

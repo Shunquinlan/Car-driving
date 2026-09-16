@@ -154,6 +154,22 @@
   /* ------------------------------------------------------------------------
      DemoBackend — sample times so the site works before Google Sheets is set up
      ------------------------------------------------------------------------ */
+  Api.reviews = function () {
+    const url = new URL(CONFIG.API_URL.trim());
+    url.searchParams.set('action', 'reviews');
+    url.searchParams.set('t', Date.now());
+    return Api.request(url.toString());
+  };
+
+  Api.submitReview = function (details) {
+    return Api.request(CONFIG.API_URL.trim(), {
+      method: 'POST',
+      // text/plain avoids the CORS preflight that Apps Script cannot answer
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(Object.assign({ action: 'submit_review' }, details)),
+    });
+  };
+
   const DemoBackend = {
     hours: { 0: null, 1: [9, 17], 2: [9, 17], 3: [9, 17], 4: [9, 17], 5: [9, 17], 6: [9, 13] }, // weekday -> [open, close]
     booked: new Set(),
@@ -671,8 +687,147 @@
   };
 
   /* ------------------------------------------------------------------------
+     Reviews — shows approved feedback, and collects new feedback
+     ------------------------------------------------------------------------ */
+  const Reviews = {
+    init() {
+      const list = document.getElementById('review-list');
+      if (!list) return; // not on the home page
+
+      this.renderApproved(list);
+      this.wireForm();
+    },
+
+    /** Replaces the built-in reviews with whatever Shun has approved. */
+    async renderApproved(list) {
+      if (!Api.isLive()) return;
+      let data;
+      try {
+        data = await Api.reviews();
+      } catch (err) {
+        return; // leave the built-in reviews in place
+      }
+      const reviews = (data && data.reviews) || [];
+      if (!reviews.length) return;
+
+      list.replaceChildren();
+      reviews.slice(0, 6).forEach((r) => {
+        const fig = document.createElement('figure');
+        fig.className = 'review';
+
+        const quote = document.createElement('blockquote');
+        const p = document.createElement('p');
+        p.textContent = r.text;
+        quote.appendChild(p);
+
+        const cap = document.createElement('figcaption');
+        cap.textContent = r.name;
+        if (r.label) {
+          const span = document.createElement('span');
+          span.textContent = r.label;
+          cap.appendChild(span);
+        }
+
+        fig.append(quote, cap);
+        list.appendChild(fig);
+      });
+    },
+
+    wireForm() {
+      const openBtn = document.getElementById('feedback-open');
+      const panel = document.getElementById('feedback-panel');
+      const form = document.getElementById('feedback-form');
+      if (!openBtn || !panel || !form) return;
+
+      const $ = (id) => document.getElementById(id);
+      const status = $('fb-status');
+      const nameEl = $('fb-name');
+      const textEl = $('fb-text');
+      const countEl = $('fb-count');
+      const submitBtn = $('fb-submit');
+
+      openBtn.addEventListener('click', () => {
+        const open = panel.hasAttribute('hidden');
+        panel.toggleAttribute('hidden', !open);
+        openBtn.setAttribute('aria-expanded', String(open));
+        if (open) nameEl.focus();
+      });
+
+      textEl.addEventListener('input', () => {
+        countEl.textContent = textEl.value.length;
+      });
+
+      const showError = (field, errorId, message) => {
+        const errorEl = $(errorId);
+        errorEl.textContent = message;
+        errorEl.hidden = !message;
+        field.classList.toggle('is-invalid', Boolean(message));
+        field.setAttribute('aria-invalid', message ? 'true' : 'false');
+        return !message;
+      };
+
+      const validate = () => {
+        const okName = showError(nameEl, 'fb-name-error',
+          nameEl.value.trim().length < 2 ? 'Please add your first name.' : '');
+        const okText = showError(textEl, 'fb-text-error',
+          textEl.value.trim().length < 15 ? 'Please write a little more so Shun knows how it went.' : '');
+        return okName && okText;
+      };
+
+      nameEl.addEventListener('blur', () => { if (status.dataset.tried) validate(); });
+      textEl.addEventListener('blur', () => { if (status.dataset.tried) validate(); });
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        status.dataset.tried = 'yes';
+        status.className = 'feedback-status';
+        status.textContent = '';
+
+        if (!validate()) {
+          status.className = 'feedback-status is-error';
+          status.textContent = 'Please fix the highlighted fields.';
+          return;
+        }
+
+        if (!Api.isLive()) {
+          status.className = 'feedback-status is-error';
+          status.textContent = 'Feedback isn\'t connected yet. Please try again later.';
+          return;
+        }
+
+        const details = {
+          name: nameEl.value.trim(),
+          review: textEl.value.trim(),
+          label: $('fb-label').value,
+          rating: Number(form.querySelector('input[name="rating"]:checked').value),
+          consent: $('fb-consent').checked,
+          website: $('fb-website').value, // honeypot
+        };
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Sending\u2026';
+        try {
+          await Api.submitReview(details);
+          panel.hidden = true;
+          openBtn.hidden = true;
+          const thanks = $('feedback-thanks');
+          thanks.hidden = false;
+          scrollToEl(thanks);
+        } catch (err) {
+          status.className = 'feedback-status is-error';
+          status.textContent = err.message || 'That didn\'t send. Please try again.';
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Send feedback';
+        }
+      });
+    },
+  };
+
+  /* ------------------------------------------------------------------------
      Start
      ------------------------------------------------------------------------ */
   Nav.init();
   Booking.init();
+  Reviews.init();
 })();

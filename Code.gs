@@ -22,7 +22,7 @@
 const SETTINGS = {
   BUSINESS_NAME: 'Drive with Shun',
   INSTRUCTOR_NAME: 'Shun',
-  OWNER_EMAIL: '50dollarrental@gmail.com',              // where alerts go. Blank = the Google account that owns this script
+  OWNER_EMAIL: '',              // where alerts go. Blank = the Google account that owns this script
   RATE_PER_HOUR: 25,            // starting rate. Change it any time from the Settings tab or admin.html, no redeploy needed
   FIRST_LESSON_DISCOUNT_PERCENT: 50, // starting first-lesson discount. Same as above, editable later
   SLOT_MINUTES: 60,             // keep in sync with script.js
@@ -31,7 +31,7 @@ const SETTINGS = {
   MAX_DAYS_AHEAD: 60,           // no bookings further out than this
   MAX_UPCOMING_PER_PERSON: 3,   // stops one phone number from grabbing every slot
   SEND_CUSTOMER_EMAIL: true,    // email the student a confirmation
-  ADMIN_KEY: 'Hond@civic2015',                // set a private password here before using admin.html (README Part 3)
+  ADMIN_KEY: '',                // set a private password here before using admin.html (README Part 3)
 
   // ---- Instant alerts to Shun's phone (README Part 2). Blank = turned off ----
   EMAIL_ALERTS: true,           // Gmail app push notification
@@ -47,8 +47,13 @@ const SHEET_BOOKINGS = 'Bookings';
 const SHEET_HOURS = 'Hours';
 const SHEET_TIME_OFF = 'Time Off';
 const SHEET_SETTINGS = 'Settings';
+const SHEET_REVIEWS = 'Reviews';
 
 const STATUSES = ['Booked', 'Started', 'In progress', 'Completed', 'Cancelled', 'No-show'];
+const REVIEW_STATUSES = ['Pending', 'Published', 'Hidden'];
+
+const REVIEW_HEADERS = ['Review ID', 'Submitted at', 'Name', 'Rating', 'Starting point', 'Review', 'Shareable', 'Status'];
+const RCOL = { NAME: 2, RATING: 3, LABEL: 4, TEXT: 5, SHAREABLE: 6, STATUS: 7 }; // 0-based
 
 const BOOKING_HEADERS = ['Booking ID', 'Booked at', 'Lesson date', 'Start', 'End', 'Hours', 'Status',
   'Name', 'Phone', 'Email', 'Experience', 'Car', 'Meeting spot', 'Notes', 'Lesson price'];
@@ -123,6 +128,14 @@ function setup() {
     ]);
   }
   settings.getRange('A1').setNote('Change these here, or from the Rates panel on admin.html. The website picks up a change within a minute, no redeploy needed.');
+
+  const reviews = ensureSheet_(ss, SHEET_REVIEWS, REVIEW_HEADERS);
+  const reviewRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(REVIEW_STATUSES, true)
+    .setAllowInvalid(true)
+    .build();
+  reviews.getRange(2, RCOL.STATUS + 1, Math.max(reviews.getMaxRows() - 1, 1), 1).setDataValidation(reviewRule);
+  reviews.getRange('A1').setNote('Feedback sent from the website. Nothing appears on the site until you set Status to "Published" - and only if the student ticked the sharing box (Shareable = Yes).');
 
   const blank = ss.getSheetByName('Sheet1');
   if (blank && blank.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(blank);
@@ -206,6 +219,17 @@ function doGet(e) {
       });
     }
 
+    if (action === 'reviews') {
+      const ss = ss_();
+      return json_({ ok: true, reviews: publishedReviews_(ss) });
+    }
+
+    if (action === 'admin_reviews') {
+      if (!isAdmin_(p.key)) return json_({ ok: false, error: 'FORBIDDEN', message: 'Wrong admin key.' });
+      const ss = ss_();
+      return json_({ ok: true, reviewStatuses: REVIEW_STATUSES, reviews: allReviews_(ss) });
+    }
+
     if (action === 'admin_bookings') {
       if (!isAdmin_(p.key)) return json_({ ok: false, error: 'FORBIDDEN', message: 'Wrong admin key.' });
       const ss = ss_();
@@ -229,6 +253,8 @@ function doPost(e) {
       return json_({ ok: false, error: 'BAD_REQUEST', message: 'The booking request could not be read. Refresh the page and try again.' });
     }
 
+    if (data.action === 'submit_review') return submitReview_(data);
+    if (data.action === 'admin_update_review') return adminUpdateReview_(data);
     if (data.action === 'admin_update_status') return adminUpdateStatus_(data);
     if (data.action === 'admin_set_rates') return adminSetRates_(data);
     if (data.action === 'admin_add_timeoff') return adminAddTimeOff_(data);
@@ -461,6 +487,125 @@ function safe_(text) {
   return /^[=+\-@]/.test(text) ? "'" + text : text;
 }
 
+/* ============================ REVIEWS ======================================
+   Feedback sent from the website lands here as "Pending". Nothing shows on the
+   site until Shun sets it to "Published" AND the student ticked the box saying
+   it could be shared. Only the first name is ever published.
+   ========================================================================== */
+
+/** Published, shareable reviews for the public website. Newest first. */
+function publishedReviews_(ss) {
+  const sheet = ss.getSheetByName(SHEET_REVIEWS);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, REVIEW_HEADERS.length).getDisplayValues();
+  const out = [];
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i];
+    if (String(row[RCOL.STATUS]).trim().toLowerCase() !== 'published') continue;
+    if (String(row[RCOL.SHAREABLE]).trim().toLowerCase() !== 'yes') continue;
+    out.push({
+      name: row[RCOL.NAME],
+      rating: Number(row[RCOL.RATING]) || 0,
+      label: row[RCOL.LABEL],
+      text: row[RCOL.TEXT],
+    });
+  }
+  return out;
+}
+
+/** Every review, any status, for the admin page. Newest first. */
+function allReviews_(ss) {
+  const sheet = ss.getSheetByName(SHEET_REVIEWS);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, REVIEW_HEADERS.length).getDisplayValues();
+  const out = [];
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i];
+    out.push({
+      reviewId: row[0], submittedAt: row[1], name: row[RCOL.NAME],
+      rating: Number(row[RCOL.RATING]) || 0, label: row[RCOL.LABEL], text: row[RCOL.TEXT],
+      shareable: String(row[RCOL.SHAREABLE]).trim().toLowerCase() === 'yes',
+      status: row[RCOL.STATUS],
+    });
+  }
+  return out;
+}
+
+function submitReview_(d) {
+  // Spam trap: bots fill the hidden "website" field. Pretend it worked, save nothing.
+  if (d.website) return json_({ ok: true });
+
+  const name = String(d.name || '').trim().slice(0, 40);
+  const text = String(d.review || '').trim().slice(0, 700);
+  const label = String(d.label || '').trim().slice(0, 60);
+  let rating = Number(d.rating);
+  if (!isFinite(rating) || rating < 1 || rating > 5) rating = 5;
+
+  if (name.length < 2) return json_({ ok: false, error: 'INVALID', message: 'Please add your first name.' });
+  if (text.length < 15) return json_({ ok: false, error: 'INVALID', message: 'Please write a little more so Shun knows how it went.' });
+
+  const ss = ss_();
+  const tz = ss.getSpreadsheetTimeZone();
+  const sheet = ensureSheet_(ss, SHEET_REVIEWS, REVIEW_HEADERS);
+  const reviewId = 'RV-' + Utilities.formatDate(new Date(), tz, 'yyMMdd') + '-' +
+    Utilities.getUuid().replace(/-/g, '').slice(0, 4).toUpperCase();
+
+  sheet.appendRow([
+    reviewId,
+    Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm'),
+    safe_(name),
+    rating,
+    safe_(label),
+    safe_(text),
+    d.consent ? 'Yes' : 'No',
+    'Pending',
+  ]);
+
+  tryAlert_('review alert', function () {
+    const lines = [
+      'New feedback for ' + SETTINGS.BUSINESS_NAME,
+      '',
+      'From: ' + name,
+      'Rating: ' + rating + '/5',
+      label ? 'Starting point: ' + label : '',
+      'Can be shared publicly: ' + (d.consent ? 'Yes' : 'No'),
+      '',
+      text,
+      '',
+      d.consent
+        ? 'To put this on the website, open the Reviews panel on your admin page (or the Reviews tab) and set it to Published.'
+        : 'This one is private - the student did not agree to it being shown.',
+      'Ref: ' + reviewId,
+    ].filter(String);
+    notifyOwner_('New feedback from ' + name + ' (' + rating + '/5)', lines.join('\n'));
+  });
+
+  return json_({ ok: true, reviewId: reviewId });
+}
+
+function adminUpdateReview_(data) {
+  if (!isAdmin_(data.key)) return json_({ ok: false, error: 'FORBIDDEN', message: 'Wrong admin key.' });
+  const status = String(data.status || '');
+  if (REVIEW_STATUSES.indexOf(status) === -1) return json_({ ok: false, error: 'INVALID', message: 'Not a valid status.' });
+
+  const ss = ss_();
+  const sheet = ss.getSheetByName(SHEET_REVIEWS);
+  const count = sheet ? sheet.getLastRow() - 1 : 0;
+  if (count < 1) return json_({ ok: false, error: 'NOT_FOUND', message: 'That review was not found.' });
+
+  const rows = sheet.getRange(2, 1, count, REVIEW_HEADERS.length).getValues();
+  for (let i = 0; i < count; i++) {
+    if (rows[i][0] !== data.reviewId) continue;
+    const shareable = String(rows[i][RCOL.SHAREABLE]).trim().toLowerCase() === 'yes';
+    if (status === 'Published' && !shareable) {
+      return json_({ ok: false, error: 'NO_CONSENT', message: 'This student did not agree to their feedback being shown publicly.' });
+    }
+    sheet.getRange(i + 2, RCOL.STATUS + 1).setValue(status);
+    return json_({ ok: true });
+  }
+  return json_({ ok: false, error: 'NOT_FOUND', message: 'That review was not found.' });
+}
+
 /* ============================ ADMIN ========================================
    Powers admin.html. Every admin request must carry the right "key" (README
    Part 3). While SETTINGS.ADMIN_KEY is blank, every admin request is refused.
@@ -567,6 +712,50 @@ function alertOwner_(b, bookingId, ss) {
     results.push(tryAlert_('Webhook', function () { sendWebhook_(b, bookingId, text); }));
   }
   return results;
+}
+
+/** Sends a plain subject + body through whichever alert channels are switched on.
+    Used for feedback alerts, which aren't bookings and so have no booking fields. */
+function notifyOwner_(subject, body) {
+  if (SETTINGS.EMAIL_ALERTS) {
+    tryAlert_('Email', function () {
+      MailApp.sendEmail({
+        to: ownerEmail_(),
+        subject: subject,
+        body: body,
+        name: SETTINGS.BUSINESS_NAME,
+      });
+    });
+  }
+  if (SETTINGS.TELEGRAM_BOT_TOKEN && SETTINGS.TELEGRAM_CHAT_ID) {
+    tryAlert_('Telegram', function () { sendTelegram_(body); });
+  }
+  if (SETTINGS.PUSHOVER_APP_TOKEN && SETTINGS.PUSHOVER_USER_KEY) {
+    tryAlert_('Pushover', function () {
+      const res = UrlFetchApp.fetch('https://api.pushover.net/1/messages.json', {
+        method: 'post',
+        muteHttpExceptions: true,
+        payload: {
+          token: SETTINGS.PUSHOVER_APP_TOKEN,
+          user: SETTINGS.PUSHOVER_USER_KEY,
+          title: subject,
+          message: body,
+        },
+      });
+      if (res.getResponseCode() !== 200) throw new Error(res.getContentText());
+    });
+  }
+  if (SETTINGS.WEBHOOK_URL) {
+    tryAlert_('Webhook', function () {
+      const res = UrlFetchApp.fetch(SETTINGS.WEBHOOK_URL, {
+        method: 'post',
+        contentType: 'application/json',
+        muteHttpExceptions: true,
+        payload: JSON.stringify({ type: 'feedback', subject: subject, text: body, content: body }),
+      });
+      if (res.getResponseCode() >= 300) throw new Error(res.getContentText());
+    });
+  }
 }
 
 function tryAlert_(label, fn) {
